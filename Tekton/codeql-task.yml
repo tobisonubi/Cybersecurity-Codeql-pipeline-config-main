@@ -1,0 +1,133 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: codeql
+  annotations:
+    tekton.dev/platforms: "linux/amd64"
+spec:
+  description: Analyse code with CodeQL
+  params:
+  - name: build-image
+    type: string
+    description: The image to use for building the project.
+  - name: repo
+    type: string
+    description: The short name for the repository, e.g. ctcampbellcom/webgoat.
+    default: ""
+  - name: ref
+    type: string
+    description: The git ref of the checked out source.
+    default: ""
+  - name: commit-sha
+    type: string
+    description: The git commit SHA of the checked out source.
+    default: ""
+  - name: source-path-dir
+    type: string
+    description: The path to the source code directory relative to the checkout root.
+    default: "."
+  - name: codeql-download-url
+    type: string
+    description: The download URL for the CodeQL bundle.
+    default: "https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz"
+  - name: codeql-bin-path
+    type: string
+    description: The download location for the CodeQL binary folder.
+    default: $(workspaces.source.path)/codeql-bin
+  - name: codeql-language
+    type: string
+    description: The language to analyse.
+  - name: codeql-build-command
+    type: string
+    description: The command to build the project.
+    default: ""
+  - name: codeql-query-suite
+    type: string
+    description: The query suite to use.
+    default: $(params.codeql-language)-code-scanning
+  - name: codeql-init-extra-args
+    type: string
+    description: Extra arguments to pass to the CodeQL CLI init command.
+    default: ""
+  - name: codeql-analyze-extra-args
+    type: string
+    description: Extra arguments to pass to the CodeQL CLI analyze command.
+    default: ""
+  - name: codeql-upload-extra-args
+    type: string
+    description: Extra arguments to pass to the CodeQL CLI upload command.
+    default: ""
+  - name: github-token-secret-name
+    type: string
+    description: Kubernetes secret name to use for uploading results.
+    default: github-token
+  - name: github-token-secret-key
+    type: string
+    description: Kubernetes secret key to use for uploading results.
+    default: github-token
+  workspaces:
+  - name: source
+  steps:
+  - name: init-build-analyse
+    image: $(params.build-image)
+    env:
+    - name: SOURCE_PATH
+      value: $(workspaces.source.path)
+    - name: SOURCE_PATH_DIR
+      value: $(params.source-path-dir)
+    - name: REPO
+      value: $(params.repo)
+    - name: REF
+      value: $(params.ref)
+    - name: COMMIT_SHA
+      value: $(params.commit-sha)
+    - name: CODEQL_DOWNLOAD_URL
+      value: $(params.codeql-download-url)
+    - name: CODEQL_PATH
+      value: $(params.codeql-bin-path)
+    - name: CODEQL_LANGUAGE
+      value: $(params.codeql-language)
+    - name: CODEQL_BUILD_COMMAND
+      value: $(params.codeql-build-command)
+    - name: CODEQL_INIT_EXTRA_ARGS
+      value: $(params.codeql-init-extra-args)
+    - name: CODEQL_ANALYZE_EXTRA_ARGS
+      value: $(params.codeql-analyze-extra-args)
+    - name: CODEQL_UPLOAD_EXTRA_ARGS
+      value: $(params.codeql-upload-extra-args)
+    - name: CODEQL_QUERY_SUITE
+      value: $(params.codeql-query-suite)
+    - name: CODEQL_EXTRACTOR_JAVA_RUN_ANNOTATION_PROCESSORS
+      value: "true"
+    - name: GITHUB_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: $(params.github-token-secret-name)
+          key: $(params.github-token-secret-key)
+    script: | 
+      #!/usr/bin/env bash
+      set -ex
+      rm -rf $CODEQL_PATH && mkdir $CODEQL_PATH
+      wget -nv $CODEQL_DOWNLOAD_URL -O codeql-bundle.tar.gz
+      tar -zxf codeql-bundle.tar.gz -C $CODEQL_PATH --strip-components=1
+      rm codeql-bundle.tar.gz
+      cd $SOURCE_PATH
+      $CODEQL_PATH/codeql database create ./codeql-db \
+        --language=$CODEQL_LANGUAGE \
+        --overwrite \
+        --working-dir=$SOURCE_PATH_DIR \
+        ${CODEQL_BUILD_COMMAND:+--command="""$CODEQL_BUILD_COMMAND"""} \
+        $CODEQL_INIT_EXTRA_ARGS
+      $CODEQL_PATH/codeql database analyze ./codeql-db \
+        --format=sarif-latest \
+        --output=codeql-results.sarif \
+        $CODEQL_QUERY_SUITE \
+        $CODEQL_ANALYZE_EXTRA_ARGS
+      $CODEQL_PATH/codeql github upload-results \
+        --sarif=codeql-results.sarif \
+        ${COMMIT_SHA:+--commit=$COMMIT_SHA} \
+        ${REF:+--ref=$REF} \
+        ${REPO:+--repository=$REPO} \
+        $CODEQL_UPLOAD_EXTRA_ARGS
+      rm -rf $CODEQL_PATH
+

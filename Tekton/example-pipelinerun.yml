@@ -1,0 +1,33 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: webgoat-clone-and-codeql-analyse-run-
+spec:
+  pipelineRef:
+    name: webgoat-clone-and-codeql-analyse
+  podTemplate:
+    securityContext:
+      fsGroup: 65532
+  taskRunSpecs:
+    - pipelineTaskName: codeql
+      stepOverrides:
+      - name: init-build-analyse
+        resources:
+          limits:
+            memory: 4Gi
+          requests:
+            memory: 4Gi
+  workspaces:
+  - name: shared-data
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+  params:
+  - name: codeql-init-extra-args
+    value: --ram=3500
+  - name: codeql-analyze-extra-args
+    value: --ram=3500
